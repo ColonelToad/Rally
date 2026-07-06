@@ -1,0 +1,12 @@
+# Environments
+mujoco_env/
+mujoco/
+pycache/
+.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Third-party assets
+mujoco_menagerie/
+*.xml
