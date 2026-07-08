@@ -10,3 +10,6 @@ pycache/
 # Third-party assets
 mujoco_menagerie/
 *.xmlmujoco_menagerie/
+
+# C++ Build files
+build/
