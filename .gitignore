@@ -9,4 +9,4 @@ pycache/
 
 # Third-party assets
 mujoco_menagerie/
-*.xml
+*.xmlmujoco_menagerie/
