@@ -1,28 +1,74 @@
-cmake_minimum_required(VERSION 3.10)
-project(RallyKinematics)
+cmake_minimum_required(VERSION 3.14)
+# Updated project name to reflect the whole system, not just kinematics
+project(Rally VERSION 0.1.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 1. Define where MuJoCo lives on your machine
+# ==============================================================================
+# 1. BEST PRACTICES & COMPILER FLAGS (From PHILOSOPHY.md Principle 3)
+# ==============================================================================
+option(RALLY_SANITIZE "Build with Address and Undefined Behavior sanitizers" ON)
+
+# Strict warnings to catch subtle C++ bugs early
+add_compile_options(-Wall -Wextra -Wpedantic -Werror=return-type)
+
+if(RALLY_SANITIZE)
+    message(STATUS "RALLY: Sanitizers ENABLED (-fsanitize=address,undefined)")
+    add_compile_options(-fsanitize=address -fsanitize=undefined)
+    add_link_options(-fsanitize=address -fsanitize=undefined)
+endif()
+
+# ==============================================================================
+# 2. DEPENDENCIES (From PHILOSOPHY.md Principle 2 & 4)
+# ==============================================================================
+
+# -- MuJoCo --
 set(MUJOCO_PATH "${CMAKE_SOURCE_DIR}/mujoco/mujoco-3.10.0" CACHE PATH "Path to MuJoCo installation")
-# 2. Find Eigen3 (System installed via apt)
+
+# -- Eigen3 --
 find_package(Eigen3 REQUIRED)
 
-# 3. Include directories for our headers
-include_directories(
-    ${MUJOCO_PATH}/include
-    ${EIGEN3_INCLUDE_DIRS}
-)
+# -- ZeroMQ --
+# We use pkg-config to reliably find the ZeroMQ C library
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(ZMQ REQUIRED libzmq)
 
-# 4. Define the executable
-add_executable(kinematics kinematics.cpp)
+# ==============================================================================
+# 3. CORE LIBRARIES
+# ==============================================================================
 
-# 5. Link the MuJoCo compiled libraries to our executable
-target_link_directories(kinematics PRIVATE ${MUJOCO_PATH}/lib)
-target_link_libraries(kinematics PRIVATE mujoco)
-add_executable(workspace workspace.cpp)
-target_link_directories(workspace PRIVATE ${MUJOCO_PATH}/lib)
-target_link_libraries(workspace PRIVATE mujoco)
-add_executable(ik ik.cpp)
-target_link_directories(ik PRIVATE ${MUJOCO_PATH}/lib)
-target_link_libraries(ik PRIVATE mujoco)
+# Build the IPC wrapper as a static library
+add_library(rally_ipc STATIC src/ipc/zmq_context.cpp)
+# Give it access to our include/ folder
+target_include_directories(rally_ipc PUBLIC ${CMAKE_SOURCE_DIR}/include)
+# Link ZeroMQ specifically to this library
+target_include_directories(rally_ipc PUBLIC ${ZMQ_INCLUDE_DIRS})
+target_link_directories(rally_ipc PUBLIC ${ZMQ_LIBRARY_DIRS})
+target_link_libraries(rally_ipc PUBLIC ${ZMQ_LIBRARIES})
+
+# ==============================================================================
+# 5. WEEK 3: SYSTEM ARCHITECTURE EXECUTABLES (Production)
+# ==============================================================================
+
+# 1. MuJoCo Bridge
+add_executable(mujoco_bridge apps/mujoco_bridge_main.cpp)
+target_link_libraries(mujoco_bridge PRIVATE rally_ipc)
+# The bridge will eventually need MuJoCo linked here too once you add the real sim logic
+target_include_directories(mujoco_bridge PRIVATE ${MUJOCO_PATH}/include)
+target_link_directories(mujoco_bridge PRIVATE ${MUJOCO_PATH}/lib)
+target_link_libraries(mujoco_bridge PRIVATE mujoco)
+
+# 2. Arm Controller
+add_executable(arm_controller apps/arm_controller_main.cpp)
+target_link_libraries(arm_controller PRIVATE rally_ipc)
+# Controller will need Eigen for kinematics/planning later
+target_link_libraries(arm_controller PRIVATE Eigen3::Eigen)
+
+# 3. Coordination Bus
+add_executable(coordination_bus apps/coordination_bus_main.cpp)
+target_link_libraries(coordination_bus PRIVATE rally_ipc)
+
+add_library(rally_core STATIC src/core/clock.cpp)
+target_include_directories(rally_core PUBLIC ${CMAKE_SOURCE_DIR}/include)
+target_link_libraries(rally_core PUBLIC Eigen3::Eigen)
