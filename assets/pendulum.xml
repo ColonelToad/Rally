@@ -1,0 +1,14 @@
+<mujoco model="inverted pendulum">
+    <option timestep="0.002" gravity="0 0 -9.81"/>
+    <worldbody>
+        <geom type="plane" size="3 3 0.1" rgba=".9 .9 .9 1"/>
+        <!-- Raised to 1.5m so the 1m pole hangs cleanly above the floor -->
+        <body name="pole" pos="0 0 1.5">
+            <joint name="hinge" type="hinge" axis="0 1 0"/>
+            <geom type="cylinder" size="0.04 0.5" pos="0 0 -0.5" mass="1" rgba="0 0.5 0.8 1"/>
+        </body>
+    </worldbody>
+    <actuator>
+        <motor joint="hinge" name="torque" ctrlrange="-50 50"/>
+    </actuator>
+</mujoco>

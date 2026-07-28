@@ -1,51 +1,49 @@
+#include "rally/core/task_executor.hpp"
+#include "rally/core/clock.hpp"
 #include "rally/ipc/zmq_context.hpp"
-#include "rally/messages/sensor_packet.hpp"
-#include "rally/messages/arm_status.hpp"
 #include <iostream>
-#include <iomanip>
 
-using namespace rally::ipc;
+using namespace rally::core;
 
-const std::string SENSOR_PUB_URL = "ipc:///tmp/rally/sensor_pub.sock";
-const std::string ARM_STATUS_PUSH_URL = "ipc:///tmp/rally/arm_a_status.sock";
+class ControlTask500Hz : public ITask {
+public:
+    void execute(uint64_t /*current_time_us*/) override {
+        // High-frequency control logic (PID / torque computation)
+    }
+    const char* get_name() const override { return "Control_500Hz"; }
+};
+
+class SensorFusion100Hz : public ITask {
+public:
+    void execute(uint64_t /*current_time_us*/) override {
+        // Medium-frequency state estimation / filtering
+    }
+    const char* get_name() const override { return "SensorFusion_100Hz"; }
+};
+
+class Diagnostics10Hz : public ITask {
+public:
+    void execute(uint64_t /*current_time_us*/) override {
+        std::cout << "[Arm Controller] 10Hz Diagnostics tick...\n";
+    }
+    const char* get_name() const override { return "Diagnostics_10Hz"; }
+};
 
 int main() {
-    std::cout << "[Arm A Controller] Starting up..." << std::endl;
-    ZmqContext ctx;
+    Clock::init(ClockMode::REALTIME);
 
-    // Connect to Bridge (Sensors)
-    ZmqSocket sensor_sub(ctx, SocketType::SUB);
-    sensor_sub.connect(SENSOR_PUB_URL);
-    sensor_sub.subscribe(); // Subscribe to all topics
+    TaskExecutor executor;
+    ControlTask500Hz control_task;
+    SensorFusion100Hz fusion_task;
+    Diagnostics10Hz diag_task;
 
-    // Connect to Coordination Bus (Status)
-    ZmqSocket status_push(ctx, SocketType::PUSH);
-    status_push.connect(ARM_STATUS_PUSH_URL);
+    // Register 500Hz (2000us period, 500us deadline)
+    executor.register_task(&control_task, 500, 500);
+    // Register 100Hz (10000us period, 2000us deadline)
+    executor.register_task(&fusion_task, 100, 2000);
+    // Register 10Hz (100000us period, 10000us deadline)
+    executor.register_task(&diag_task, 10, 10000);
 
-    // Stack-allocated buffers
-    SensorPacket incoming_sensor{};
-    ArmStatus outgoing_status{};
-    outgoing_status.arm_id = 0; // Arm A
-
-    std::cout << "[Arm A Controller] Listening for sine wave...\n";
-
-    while (true) {
-        // Zero-allocation receive. Blocks until data arrives.
-        if (sensor_sub.receive(incoming_sensor)) {
-            
-            // Print every 100th packet (every ~200ms at 500Hz) to keep stdout clean
-            if (incoming_sensor.sequence_number % 100 == 0) {
-                std::cout << "[Arm A] Seq: " << incoming_sensor.sequence_number 
-                          << " | Joint 0 Pos: " << std::fixed << std::setprecision(4) 
-                          << incoming_sensor.joint_positions[0] << std::endl;
-            }
-
-            // Pretend we computed a control step, update and send status to the Bus
-            outgoing_status.timestamp_us = incoming_sensor.timestamp_us;
-            outgoing_status.current_state = 1; // 1 = Moving
-            status_push.send(outgoing_status, ZMQ_DONTWAIT);
-        }
-    }
-
+    executor.run();
     return 0;
 }

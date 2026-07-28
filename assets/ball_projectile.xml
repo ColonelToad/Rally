@@ -1,0 +1,13 @@
+<mujoco model="ball projectile">
+    <option timestep="0.002" gravity="0 0 -9.81"/>
+    <worldbody>
+        <!-- Ground plane for landing detection -->
+        <geom type="plane" size="10 10 0.1" rgba="0.8 0.8 0.8 1"/>
+        
+        <!-- Projectile Sphere with 6-DOF Free Joint -->
+        <body name="ball" pos="0 0 3.0">
+            <freejoint name="ball_freejoint"/>
+            <geom type="sphere" size="0.05" mass="0.15" rgba="0.9 0.2 0.2 1" friction="0.4"/>
+        </body>
+    </worldbody>
+</mujoco>

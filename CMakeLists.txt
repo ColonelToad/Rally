@@ -91,3 +91,11 @@ add_test(NAME TaskExecutorTest COMMAND test_task_executor)
 
 add_executable(benchmark_executor apps/benchmark_executor_main.cpp)
 target_link_libraries(benchmark_executor PRIVATE rally_core Eigen3::Eigen)
+
+add_executable(ekf_validator apps/ekf_validator_main.cpp)
+# Link the basic 'mujoco' library and Eigen
+target_link_libraries(ekf_validator PRIVATE rally_core mujoco Eigen3::Eigen)
+# Point to both our local includes and MuJoCo's includes
+target_include_directories(ekf_validator PRIVATE include ${MUJOCO_PATH}/include)
+# Point to where the MuJoCo library file actually lives
+target_link_directories(ekf_validator PRIVATE ${MUJOCO_PATH}/lib)

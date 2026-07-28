@@ -14,3 +14,7 @@ mujoco_menagerie/
 # C++ Build files
 build/
 notes/
+
+# Data
+landing_results.csv
+*.png

@@ -1,50 +1,101 @@
-#include "rally/ipc/zmq_context.hpp"
-#include "rally/messages/sensor_packet.hpp"
+#include "rally/core/task_executor.hpp"
+#include "rally/core/clock.hpp"
+#include "rally/core/spsc_ring_buffer.hpp"
+#include <mujoco/mujoco.h>
 #include <iostream>
-#include <chrono>
+#include <iomanip>
 #include <thread>
-#include <cmath>
+#include <chrono>
 
-using namespace rally::ipc;
+using namespace rally::core;
 
-const std::string SENSOR_PUB_URL = "ipc:///tmp/rally/sensor_pub.sock";
-const double LOOP_RATE_HZ = 500.0;
-const double CYCLE_TIME_MS = 1000.0 / LOOP_RATE_HZ;
+// Struct to pass telemetry data safely across threads
+struct TelemetryMsg {
+    double time;
+    double angle;
+    double torque;
+};
 
-int main() {
-    std::cout << "[MuJoCo Bridge] Starting up..." << std::endl;
-    ZmqContext ctx;
-    
-    // Bind the publisher
-    ZmqSocket sensor_pub(ctx, SocketType::PUB);
-    sensor_pub.bind(SENSOR_PUB_URL);
+// Global SPSC ring buffer with a power-of-two capacity (e.g., 1024 slots)
+SpscRingBuffer<TelemetryMsg, 1024> telemetry_queue;
 
-    // Pre-allocate the struct on the stack (Principle 3: No heap in hot path)
-    SensorPacket packet{};
-    packet.sequence_number = 0;
+class PhysicsControlTask : public ITask {
+public:
+    PhysicsControlTask(mjModel* m, mjData* d) : m_(m), d_(d) {}
 
-    std::cout << "[MuJoCo Bridge] Alive. Publishing 1Hz sine wave at 500Hz...\n";
-    auto start_time = std::chrono::steady_clock::now();
+    void execute(uint64_t /*current_time_us*/) override {
+        double current_angle = d_->qpos[0];
+        double current_vel   = d_->qvel[0];
 
-    while (true) {
-        auto now = std::chrono::steady_clock::now();
-        double elapsed_sec = std::chrono::duration<double>(now - start_time).count();
+        double target_angle = 1.0;
+        double kp = 50.0;
+        double kd = 5.0;
 
-        // Populate header
-        packet.timestamp_us = std::chrono::duration_cast<std::chrono::microseconds>(
-            now.time_since_epoch()).count();
-        packet.sequence_number++;
+        double error = target_angle - current_angle;
+        double torque = (kp * error) - (kd * current_vel);
 
-        // Inject 1Hz sine wave into joint 0
-        packet.joint_positions[0] = std::sin(2.0 * M_PI * 1.0 * elapsed_sec);
-        packet.joint_velocities[0] = 2.0 * M_PI * std::cos(2.0 * M_PI * 1.0 * elapsed_sec);
+        d_->ctrl[0] = torque;
+        mj_step(m_, d_);
 
-        // Zero-allocation send
-        sensor_pub.send(packet);
-
-        // Naive sleep to approximate 500Hz (will be replaced by Week 4 Task Executor)
-        std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<int>(CYCLE_TIME_MS)));
+        // Push telemetry non-blocking into the lock-free ring buffer
+        TelemetryMsg msg{d_->time, current_angle, d_->ctrl[0]};
+        telemetry_queue.push(msg); // If full, drops frame safely without blocking
     }
 
+    const char* get_name() const override { return "MuJoCo_Sim_500Hz"; }
+
+private:
+    mjModel* m_;
+    mjData* d_;
+};
+
+int main(int, char**) {
+    Clock::init(ClockMode::REALTIME);
+
+    mjModel* m = mj_loadXML("assets/pendulum.xml", nullptr, nullptr, 0);
+    if (!m) return 1;
+    mjData* d = mj_makeData(m);
+
+    // Background consumer thread for printing telemetry (Runs on standard OS scheduler)
+    bool logger_running = true;
+    std::thread logger_thread([&logger_running]() {
+        TelemetryMsg msg;
+        while (logger_running) {
+            bool received = false;
+            // Drain the queue as messages arrive
+            while (telemetry_queue.pop(msg)) {
+                received = true;
+                std::cout << std::fixed << std::setprecision(3)
+                          << "[Async Telemetry] Time: " << msg.time << "s | "
+                          << "Angle: " << msg.angle << " rad | "
+                          << "Torque: " << msg.torque << " Nm\n";
+            }
+            if (!received) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+            }
+        }
+    });
+
+    configure_realtime_thread(80, 1);
+    
+    TaskExecutor executor;
+    PhysicsControlTask control_task(m, d);
+    executor.register_task(&control_task, 500, 2000);
+
+    std::cout << "[Bridge] Running real-time simulation with lock-free SPSC queue...\n";
+    
+    while (d->time < 3.0) {
+        executor.step();
+    }
+
+    logger_running = false;
+    if (logger_thread.joinable()) {
+        logger_thread.join();
+    }
+
+    executor.get_task_stats(0).print_histogram(control_task.get_name());
+
+    mj_deleteData(d);
+    mj_deleteModel(m);
     return 0;
 }
