@@ -69,6 +69,25 @@ target_link_libraries(arm_controller PRIVATE Eigen3::Eigen)
 add_executable(coordination_bus apps/coordination_bus_main.cpp)
 target_link_libraries(coordination_bus PRIVATE rally_ipc)
 
-add_library(rally_core STATIC src/core/clock.cpp)
+add_library(rally_core STATIC 
+    src/core/clock.cpp
+    src/core/task_executor.cpp
+)
 target_include_directories(rally_core PUBLIC ${CMAKE_SOURCE_DIR}/include)
 target_link_libraries(rally_core PUBLIC Eigen3::Eigen)
+target_link_libraries(mujoco_bridge PRIVATE rally_ipc rally_core)
+target_link_libraries(arm_controller PRIVATE rally_ipc rally_core Eigen3::Eigen)
+target_link_libraries(coordination_bus PRIVATE rally_ipc rally_core)
+
+enable_testing()
+
+add_executable(test_task_executor tests/unit/test_task_executor.cpp)
+# Ensure it can find catch.hpp in the unit tests folder
+target_include_directories(test_task_executor PRIVATE tests/unit)
+target_link_libraries(test_task_executor PRIVATE rally_core)
+
+# Register the test with CMake
+add_test(NAME TaskExecutorTest COMMAND test_task_executor)
+
+add_executable(benchmark_executor apps/benchmark_executor_main.cpp)
+target_link_libraries(benchmark_executor PRIVATE rally_core Eigen3::Eigen)
