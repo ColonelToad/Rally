@@ -58,6 +58,7 @@ target_link_libraries(mujoco_bridge PRIVATE rally_ipc)
 target_include_directories(mujoco_bridge PRIVATE ${MUJOCO_PATH}/include)
 target_link_directories(mujoco_bridge PRIVATE ${MUJOCO_PATH}/lib)
 target_link_libraries(mujoco_bridge PRIVATE mujoco)
+target_link_libraries(mujoco_bridge PRIVATE mujoco glfw)
 
 # 2. Arm Controller
 add_executable(arm_controller apps/arm_controller_main.cpp)

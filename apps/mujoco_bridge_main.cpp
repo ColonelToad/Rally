@@ -1,101 +1,103 @@
-#include "rally/core/task_executor.hpp"
-#include "rally/core/clock.hpp"
-#include "rally/core/spsc_ring_buffer.hpp"
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wattributes"
 #include <mujoco/mujoco.h>
+#pragma GCC diagnostic pop
+
+#include <zmq.h>
 #include <iostream>
-#include <iomanip>
 #include <thread>
+#include <atomic>
 #include <chrono>
+#include <vector>
+#include <algorithm>
 
-using namespace rally::core;
+// MuJoCo data structures
+mjModel* m = nullptr;
+mjData* d = nullptr;
 
-// Struct to pass telemetry data safely across threads
-struct TelemetryMsg {
-    double time;
-    double angle;
-    double torque;
-};
+std::atomic<bool> simulation_running(true);
 
-// Global SPSC ring buffer with a power-of-two capacity (e.g., 1024 slots)
-SpscRingBuffer<TelemetryMsg, 1024> telemetry_queue;
+/**
+ * @brief Hard real-time control loop running at 500Hz, publishing qpos via ZMQ.
+ */
+void physics_control_loop(void* zmq_pub) {
+    const double dt = 0.002; // 500 Hz
+    const int nq = m->nq;
+    std::vector<double> qpos_buffer(nq);
 
-class PhysicsControlTask : public ITask {
-public:
-    PhysicsControlTask(mjModel* m, mjData* d) : m_(m), d_(d) {}
+    while (simulation_running.load()) {
+        auto start_time = std::chrono::steady_clock::now();
 
-    void execute(uint64_t /*current_time_us*/) override {
-        double current_angle = d_->qpos[0];
-        double current_vel   = d_->qvel[0];
+        // 1. TODO: Run EKF Prediction (writing into d as needed)
+        // 2. TODO: Run Quintic Spline Path Planner
+        // 3. TODO: Run Impedance Controller (calculate torques into d->ctrl)
 
-        double target_angle = 1.0;
-        double kp = 50.0;
-        double kd = 5.0;
+        // 4. Step MuJoCo physics: updates d->qpos, d->qvel, etc.
+        mj_step(m, d);
 
-        double error = target_angle - current_angle;
-        double torque = (kp * error) - (kd * current_vel);
+        // 5. Copy qpos into a contiguous buffer and publish
+        std::copy(d->qpos, d->qpos + nq, qpos_buffer.begin());
 
-        d_->ctrl[0] = torque;
-        mj_step(m_, d_);
-
-        // Push telemetry non-blocking into the lock-free ring buffer
-        TelemetryMsg msg{d_->time, current_angle, d_->ctrl[0]};
-        telemetry_queue.push(msg); // If full, drops frame safely without blocking
-    }
-
-    const char* get_name() const override { return "MuJoCo_Sim_500Hz"; }
-
-private:
-    mjModel* m_;
-    mjData* d_;
-};
-
-int main(int, char**) {
-    Clock::init(ClockMode::REALTIME);
-
-    mjModel* m = mj_loadXML("assets/pendulum.xml", nullptr, nullptr, 0);
-    if (!m) return 1;
-    mjData* d = mj_makeData(m);
-
-    // Background consumer thread for printing telemetry (Runs on standard OS scheduler)
-    bool logger_running = true;
-    std::thread logger_thread([&logger_running]() {
-        TelemetryMsg msg;
-        while (logger_running) {
-            bool received = false;
-            // Drain the queue as messages arrive
-            while (telemetry_queue.pop(msg)) {
-                received = true;
-                std::cout << std::fixed << std::setprecision(3)
-                          << "[Async Telemetry] Time: " << msg.time << "s | "
-                          << "Angle: " << msg.angle << " rad | "
-                          << "Torque: " << msg.torque << " Nm\n";
-            }
-            if (!received) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(20));
-            }
+        int rc = zmq_send(zmq_pub,
+                          qpos_buffer.data(),
+                          nq * sizeof(double),
+                          ZMQ_DONTWAIT);
+        if (rc == -1) {
+            // Optional: log errno or ignore; EAGAIN is common if no subscriber yet
+            // std::cerr << "ZMQ send failed: " << zmq_strerror(zmq_errno()) << std::endl;
         }
-    });
 
-    configure_realtime_thread(80, 1);
-    
-    TaskExecutor executor;
-    PhysicsControlTask control_task(m, d);
-    executor.register_task(&control_task, 500, 2000);
+        // Enforce 500Hz strict timing
+        auto end_time = std::chrono::steady_clock::now();
+        std::chrono::duration<double> elapsed = end_time - start_time;
+        if (elapsed.count() < dt) {
+            std::this_thread::sleep_for(std::chrono::duration<double>(dt - elapsed.count()));
+        }
+    }
+}
 
-    std::cout << "[Bridge] Running real-time simulation with lock-free SPSC queue...\n";
-    
-    while (d->time < 3.0) {
-        executor.step();
+int main(int argc, char** argv) {
+    // 1. Load MuJoCo Model
+    char error[1000] = "Could not load XML model";
+    m = mj_loadXML("panda_hit_scene.xml", nullptr, error, 1000);
+    if (!m) {
+        std::cerr << "MuJoCo Load Error: " << error << std::endl;
+        return 1;
+    }
+    d = mj_makeData(m);
+
+    // 2. Initialize ZeroMQ
+    void* context = zmq_ctx_new();
+    void* publisher = zmq_socket(context, ZMQ_PUB);
+
+    // Bind to localhost:5556 (Python will connect)
+    int rc = zmq_bind(publisher, "tcp://*:5556");
+    if (rc != 0) {
+        std::cerr << "Failed to bind ZMQ PUB socket: "
+                  << zmq_strerror(zmq_errno()) << std::endl;
+        mj_deleteData(d);
+        mj_deleteModel(m);
+        zmq_close(publisher);
+        zmq_ctx_term(context);
+        return 1;
     }
 
-    logger_running = false;
-    if (logger_thread.joinable()) {
-        logger_thread.join();
-    }
+    std::cout << "[Bridge] Starting 500Hz Physics Publisher..." << std::endl;
+    std::thread physics_thread(physics_control_loop, publisher);
 
-    executor.get_task_stats(0).print_histogram(control_task.get_name());
+    // 3. Simple blocking wait so the program doesn't exit
+    std::cout << "[Bridge] Press Enter to stop." << std::endl;
+    std::cin.get();
+
+    // 4. Cleanup
+    simulation_running.store(false);
+    physics_thread.join();
+
+    zmq_close(publisher);
+    zmq_ctx_term(context);
 
     mj_deleteData(d);
     mj_deleteModel(m);
+
     return 0;
 }
