@@ -2,6 +2,14 @@ cmake_minimum_required(VERSION 3.14)
 # Updated project name to reflect the whole system, not just kinematics
 project(Rally VERSION 0.1.0 LANGUAGES CXX)
 
+# --- Embedded Constraints & Sanitizers ---
+# Enable warnings and treat them as errors for embedded discipline
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -Wextra -Werror")
+
+# Enable AddressSanitizer and UndefinedBehaviorSanitizer for Debug builds
+set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address,undefined -fno-omit-frame-pointer")
+set(CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_LINKER_FLAGS_DEBUG} -fsanitize=address,undefined")
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 

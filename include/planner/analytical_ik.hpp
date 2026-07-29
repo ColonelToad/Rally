@@ -21,7 +21,7 @@ public:
         const double d1 = 0.333;
         const double d3 = 0.316;
         const double d5 = 0.384;
-        const double d7 = 0.107; // Distance to end effector grasp point
+        //const double d7 = 0.107; // Distance to end effector grasp point
 
         // 2. Approximate target wrist center position by backing off along the approach vector
         // For a ball interception hit, we assume an overhead or side reach pointing inwards.

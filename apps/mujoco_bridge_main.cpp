@@ -15,6 +15,7 @@
 #include "planner/analytical_ik.hpp"
 #include "planner/joint_trajectory.hpp"
 #include "control/impedance_controller.hpp"
+#include "hal/mujoco_emulator.hpp"
 
 mjModel* m = nullptr;
 mjData* d = nullptr;
@@ -25,94 +26,87 @@ void physics_control_loop(void* zmq_pub) {
     const int nq = m->nq;
     std::vector<double> qpos_buffer(nq);
 
+    // --- INITIALIZE HAL ---
+    hal::MuJoCoEmulator hardware(m, d);
+    hal::Sensor* sensor = &hardware;
+    hal::Actuator* actuator = &hardware;
+
     JointTrajectoryManager traj_manager;
     ImpedanceController impedance_ctrl;
     bool trajectory_triggered = false;
+    double last_throw_time = -4.0; 
 
-    // SAFELY Find the ball's memory addresses in MuJoCo
-    int ball_joint_id = mj_name2id(m, mjOBJ_JOINT, "ball_joint");
+    // Environment variables (Used only for the batting cage hack)
     int ball_qpos_adr = -1;
     int ball_qvel_adr = -1;
-    
+    int ball_joint_id = mj_name2id(m, mjOBJ_JOINT, "ball_joint");
     if (ball_joint_id >= 0) {
         ball_qpos_adr = m->jnt_qposadr[ball_joint_id];
         ball_qvel_adr = m->jnt_dofadr[ball_joint_id];
-    } else {
-        std::cerr << "[Warning] 'ball_joint' not found in physics loop!" << std::endl;
     }
-
-    // Add a timer variable right before the loop
-    double last_throw_time = -4.0; // Start negative so it throws immediately at t=0
 
     while (simulation_running.load()) {
         auto start_time = std::chrono::steady_clock::now();
 
-        // --- THE BATTING CAGE: THROW EVERY 4 SECONDS ---
+        // --- ENVIRONMENT: THE BATTING CAGE ---
         if (ball_qpos_adr >= 0 && (d->time - last_throw_time) > 4.0) {
-            // Reset position to the starting point
-            d->qpos[ball_qpos_adr]     = 2.0; // X
-            d->qpos[ball_qpos_adr + 1] = 0.0; // Y
-            d->qpos[ball_qpos_adr + 2] = 0.5; // Z
-            
-            // Reset velocity (The Pitch)
-            d->qvel[ball_qvel_adr]     = -3.0; // vx
-            d->qvel[ball_qvel_adr + 1] = 0.0;  // vy
-            d->qvel[ball_qvel_adr + 2] = 3.5;  // vz
-            
+            d->qpos[ball_qpos_adr] = 2.0; d->qpos[ball_qpos_adr + 1] = 0.0; d->qpos[ball_qpos_adr + 2] = 0.5;
+            d->qvel[ball_qvel_adr] = -3.0; d->qvel[ball_qvel_adr + 1] = 0.0; d->qvel[ball_qvel_adr + 2] = 3.5;
             last_throw_time = d->time;
-            trajectory_triggered = false; // Reset the arm so it can swing again
-            std::cout << "[Bridge] Pitching ball!" << std::endl;
+            trajectory_triggered = false;
         }
 
-        // --- THE BRAIN: PREDICT & SWING ---
-        if (!trajectory_triggered && ball_qpos_adr >= 0) {
-            double bx = d->qpos[ball_qpos_adr];
-            double by = d->qpos[ball_qpos_adr + 1];
-            double bz = d->qpos[ball_qpos_adr + 2];
-            
-            double vx = d->qvel[ball_qvel_adr];
-            double vy = d->qvel[ball_qvel_adr + 1];
-            double vz = d->qvel[ball_qvel_adr + 2];
+        // =================================================================
+        // --- EMBEDDED FIRMWARE HOT PATH (Zero MuJoCo dependencies) ---
+        // =================================================================
 
-            double intercept_x = 0.5;
+        std::array<double, 7> q_curr, dq_curr;
+        sensor->readJoints(q_curr, dq_curr);
 
-            if (vx < -0.1 && bx > intercept_x) { 
-                double t_intercept = (intercept_x - bx) / vx;
+        std::array<double, 3> ball_pos, ball_vel;
+        sensor->readBallState(ball_pos, ball_vel);
 
-                if (t_intercept < 1.0 && t_intercept > 0.1) {
-                    double intercept_y = by + (vy * t_intercept);
-                    double intercept_z = bz + (vz * t_intercept) - (0.5 * 9.81 * t_intercept * t_intercept);
+        // 1. Prediction & Planning
+        if (!trajectory_triggered && ball_vel[0] < -0.1 && ball_pos[0] > 0.5) { 
+            double t_intercept = (0.5 - ball_pos[0]) / ball_vel[0];
 
-                    std::array<double, 7> q_current = {d->qpos[0], d->qpos[1], d->qpos[2], d->qpos[3], d->qpos[4], d->qpos[5], d->qpos[6]};
-                    std::array<double, 7> v_zero = {0, 0, 0, 0, 0, 0, 0};
-                    std::array<double, 7> q_target;
+            if (t_intercept < 1.0 && t_intercept > 0.1) {
+                double intercept_y = ball_pos[1] + (ball_vel[1] * t_intercept);
+                double intercept_z = ball_pos[2] + (ball_vel[2] * t_intercept) - (0.5 * 9.81 * t_intercept * t_intercept);
 
-                    if (AnalyticalIK::computeIK(intercept_x, intercept_y, intercept_z, 0.0, q_target)) {
-                        traj_manager.startTrajectory(q_current, v_zero, v_zero, q_target, v_zero, v_zero, t_intercept);
-                        trajectory_triggered = true;
-                        std::cout << "[Bridge] Intercepting at Z: " << intercept_z << " in " << t_intercept << "s!" << std::endl;
-                    }
+                std::array<double, 7> v_zero = {0, 0, 0, 0, 0, 0, 0};
+                std::array<double, 7> q_target;
+
+                if (AnalyticalIK::computeIK(0.5, intercept_y, intercept_z, 0.0, q_target)) {
+                    traj_manager.startTrajectory(q_curr, v_zero, v_zero, q_target, v_zero, v_zero, t_intercept);
+                    trajectory_triggered = true;
                 }
             }
         }
 
-        // --- TRAJECTORY EVALUATION ---
-        std::array<double, 7> q_ref, v_ref, a_ref;
-        for(int i=0; i<7; ++i) { q_ref[i] = d->qpos[i]; v_ref[i] = 0.0; a_ref[i] = 0.0; } 
+        // 2. Trajectory Evaluation
+        std::array<double, 7> q_ref = q_curr; 
+        std::array<double, 7> v_ref = {0, 0, 0, 0, 0, 0, 0};
+        std::array<double, 7> a_ref = {0, 0, 0, 0, 0, 0, 0};
 
         if (traj_manager.isActive()) {
             traj_manager.update(dt, q_ref, v_ref, a_ref);
         }
         
-        // --- IMPEDANCE CONTROL ---
-        impedance_ctrl.computeTorques(m, d, q_ref, v_ref);
+        // 3. Impedance Control & Actuation
+        std::array<double, 7> commanded_torques = impedance_ctrl.computeTorques(q_curr, dq_curr, q_ref, v_ref);
+        actuator->writeTorques(commanded_torques);
 
-        // --- STEP PHYSICS & PUBLISH ---
+        // =================================================================
+        // --- END EMBEDDED FIRMWARE HOT PATH ---
+        // =================================================================
+
+        // Step Physics & Publish Telemetry
         mj_step(m, d);
         std::copy(d->qpos, d->qpos + nq, qpos_buffer.begin());
         zmq_send(zmq_pub, qpos_buffer.data(), nq * sizeof(double), ZMQ_DONTWAIT);
 
-        // --- TIMING ---
+        // Enforce 500Hz Timing
         auto end_time = std::chrono::steady_clock::now();
         std::chrono::duration<double> elapsed = end_time - start_time;
         if (elapsed.count() < dt) {
@@ -121,7 +115,7 @@ void physics_control_loop(void* zmq_pub) {
     }
 }
 
-int main(int argc, char** argv) {
+int main(int /*argc*/, char** /*argv*/) {
     char error[1000] = "Could not load XML model";
     m = mj_loadXML("panda_hit_scene.xml", nullptr, error, 1000);
     if (!m) {
@@ -134,7 +128,7 @@ int main(int argc, char** argv) {
     void* publisher = zmq_socket(context, ZMQ_PUB);
     zmq_bind(publisher, "tcp://*:5556");
 
-    std::cout << "[Bridge] Starting 500Hz Physics Publisher..." << std::endl;
+    std::cout << "[Bridge] Starting 500Hz Physics Publisher with HAL..." << std::endl;
     std::thread physics_thread(physics_control_loop, publisher);
 
     std::cout << "[Bridge] Press Enter to stop." << std::endl;
