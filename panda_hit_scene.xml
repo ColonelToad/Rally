@@ -19,17 +19,15 @@
         <light pos="0 0 3" dir="0 0 -1" directional="true"/>
         <geom name="floor" size="0 0 0.05" type="plane" material="grid" condim="3"/>
 
-        <body name="robot_base_pedestal" pos="0 0 0.5">
-            <geom type="cylinder" size="0.15 0.5" rgba="0.2 0.2 0.2 1"/>
-        </body>
-
-        <body name="target_ball" pos="1.5 0.0 2.0">
-            <freejoint name="ball_freejoint"/>
-            <geom type="sphere" size="0.05" mass="0.15" rgba="0.9 0.2 0.2 1" friction="0.4"/>
+        <!-- The Ball -->
+        <body name="ball" pos="2.0 0.0 0.5">
+            <!-- The freejoint name is critical for finding it in C++ -->
+            <freejoint name="ball_joint"/>
+            <geom type="sphere" size="0.04" rgba="1 0 0 1" mass="0.05" friction="1 0.005 0.0001"/>
         </body>
     </worldbody>
 
     <contact>
-        <exclude body1="target_ball" body2="link0"/>
+        <exclude body1="ball" body2="link0"/>
     </contact>
 </mujoco>

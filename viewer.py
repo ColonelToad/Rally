@@ -50,7 +50,7 @@ def run_viewer(model, data):
                 pass
 
             # Step physics locally (optional; can be zero or tiny dt)
-            mujoco.mj_step(model, data)
+            mujoco.mj_forward(model, data)
 
             current_time = time.time()
             if (current_time - last_render_time) >= render_interval:
