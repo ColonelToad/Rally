@@ -12,7 +12,8 @@ public:
     /**
      * @brief Reads joint positions and velocities from hardware.
      */
-    virtual void readJoints(std::array<double, 7>& q, std::array<double, 7>& dq) = 0;
+    virtual void readJoints(std::array<double, 7>& q_left, std::array<double, 7>& dq_left,
+                        std::array<double, 7>& q_right, std::array<double, 7>& dq_right) = 0;
 
     /**
      * @brief Reads external environmental data (e.g., ball tracking).

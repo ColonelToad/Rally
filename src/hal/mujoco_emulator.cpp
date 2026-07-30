@@ -15,13 +15,18 @@ MuJoCoEmulator::MuJoCoEmulator(const mjModel* model, mjData* data) : m(model), d
 }
 
 // --- Sensor Interface ---
-void MuJoCoEmulator::readJoints(std::array<double, 7>& q, std::array<double, 7>& dq) {
-    // Note: Currently only reading the first 7 joints (Left Arm). 
-    // If your impedance controller needs Right Arm states, this will need to be 
-    // updated to accept an arm index or return both arrays.
+void MuJoCoEmulator::readJoints(std::array<double, 7>& q_left, std::array<double, 7>& dq_left,
+                                std::array<double, 7>& q_right, std::array<double, 7>& dq_right) {
+    // Assuming Left Arm is mapped to the first 7 joints in your XML
     for (int i = 0; i < 7; ++i) {
-        q[i] = d->qpos[i];
-        dq[i] = d->qvel[i];
+        q_left[i] = d->qpos[i];
+        dq_left[i] = d->qvel[i];
+    }
+    
+    // Assuming Right Arm is mapped to the next 7 joints in your XML
+    for (int i = 0; i < 7; ++i) {
+        q_right[i] = d->qpos[i + 7];
+        dq_right[i] = d->qvel[i + 7];
     }
 }
 

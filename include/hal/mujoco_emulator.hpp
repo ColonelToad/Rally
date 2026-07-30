@@ -20,7 +20,8 @@ public:
     MuJoCoEmulator(const mjModel* model, mjData* data);
 
     // --- Sensor Interface ---
-    void readJoints(std::array<double, 7>& q, std::array<double, 7>& dq) override;
+    void readJoints(std::array<double, 7>& q_left, std::array<double, 7>& dq_left,
+                    std::array<double, 7>& q_right, std::array<double, 7>& dq_right) override;
     void readBallState(std::array<double, 3>& pos, std::array<double, 3>& vel) override;
     double getTime() override;
 

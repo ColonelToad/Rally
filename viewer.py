@@ -46,9 +46,15 @@ def create_model():
 
 def run_viewer(model, data):
     context = zmq.Context()
+    
+    # Telemetry Subscriber (PULL from C++)
     socket = context.socket(zmq.SUB)
     socket.connect("tcp://localhost:5556")
     socket.setsockopt_string(zmq.SUBSCRIBE, "")
+
+    # Command Publisher (PUSH to C++)
+    cmd_socket = context.socket(zmq.PUSH)
+    cmd_socket.connect("tcp://localhost:5557")
 
     nq = model.nq
     msg_size = nq * 8
@@ -76,17 +82,9 @@ def run_viewer(model, data):
             except zmq.Again:
                 pass
 
-            # Handle Human Commands locally or send to C++ backend
+            # Handle Human Commands by sending them to C++ backend
             if human_command["serv_ball"]:
-                # Find ball joint qpos address and launch it towards Arm A
-                ball_joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "ball_joint")
-                if ball_joint_id >= 0:
-                    qpos_adr = model.jnt_qposadr[ball_joint_id]
-                    dof_adr = model.jnt_dofadr[ball_joint_id]
-                    
-                    # Reset ball position to center of table above net, moving towards Arm A
-                    data.qpos[qpos_adr : qpos_adr+3] = [1.2, 0.0, 1.2] # Start on right side
-                    data.qvel[dof_adr : dof_adr+3] = [-3.0, 0.0, 1.0] # Velocity towards left
+                cmd_socket.send_string("SERVE")
                 human_command["serv_ball"] = False
 
             mujoco.mj_forward(model, data)
@@ -99,6 +97,7 @@ def run_viewer(model, data):
             time.sleep(0.001)
 
     socket.close()
+    cmd_socket.close()
     context.term()
 
 
