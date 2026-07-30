@@ -12,7 +12,7 @@ public:
     /**
      * @brief Writes torque commands to hardware motors.
      */
-    virtual void writeTorques(const std::array<double, 7>& torques) = 0;
+    virtual void writeTorques(const std::array<double, 7>& tau_left, const std::array<double, 7>& tau_right) = 0;
 };
 
 } // namespace hal

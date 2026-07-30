@@ -56,16 +56,25 @@ target_link_directories(rally_ipc PUBLIC ${ZMQ_LIBRARY_DIRS})
 target_link_libraries(rally_ipc PUBLIC ${ZMQ_LIBRARIES})
 
 # ==============================================================================
+# 4. HARDWARE ABSTRACTION LAYER (HAL)
+# ==============================================================================
+add_library(rally_hal STATIC src/hal/mujoco_emulator.cpp)
+target_include_directories(rally_hal PUBLIC ${CMAKE_SOURCE_DIR}/include)
+# The HAL needs MuJoCo headers to compile
+target_include_directories(rally_hal PUBLIC ${MUJOCO_PATH}/include)
+target_link_directories(rally_hal PUBLIC ${MUJOCO_PATH}/lib)
+target_link_libraries(rally_hal PUBLIC mujoco)
+
+# ==============================================================================
 # 5. WEEK 3: SYSTEM ARCHITECTURE EXECUTABLES (Production)
 # ==============================================================================
 
 # 1. MuJoCo Bridge
 add_executable(mujoco_bridge apps/mujoco_bridge_main.cpp)
-target_link_libraries(mujoco_bridge PRIVATE rally_ipc)
-# The bridge will eventually need MuJoCo linked here too once you add the real sim logic
+# Link the new rally_hal library alongside ipc and core
+target_link_libraries(mujoco_bridge PRIVATE rally_ipc rally_core rally_hal)
 target_include_directories(mujoco_bridge PRIVATE ${MUJOCO_PATH}/include)
 target_link_directories(mujoco_bridge PRIVATE ${MUJOCO_PATH}/lib)
-target_link_libraries(mujoco_bridge PRIVATE mujoco)
 target_link_libraries(mujoco_bridge PRIVATE mujoco glfw)
 
 # 2. Arm Controller

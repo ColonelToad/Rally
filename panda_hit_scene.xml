@@ -1,33 +1,76 @@
-<mujoco model="panda_impedance_intercept">
+<mujoco model="rally_dual_arm_arena">
     <option timestep="0.002" gravity="0 0 -9.81" integrator="RK4"/>
 
-    <!-- Include path from the project root -->
-    <include file="mujoco_menagerie/franka_emika_panda/panda.xml"/>
+    <!-- We will include the manually prefixed arms here -->
+    <include file="mujoco_menagerie/panda_left/panda.xml"/>
+    <include file="mujoco_menagerie/panda_right/panda.xml"/>
 
     <visual>
         <rgba haze="0.15 0.25 0.35 1"/>
-        <global azimuth="120" elevation="-20"/>
+        <global azimuth="90" elevation="-20"/>
     </visual>
 
     <asset>
         <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512"/>
         <texture name="grid" type="2d" builtin="checker" width="512" height="512" rgb1=".1 .2 .3" rgb2=".2 .3 .4"/>
         <material name="grid" texture="grid" texrepeat="1 1" texuniform="true" reflectance=".2"/>
+        
+        <!-- Table materials -->
+        <material name="table_blue" rgba="0.1 0.3 0.6 1" reflectance="0.1"/>
+        <material name="net_white" rgba="0.9 0.9 0.9 0.5"/>
     </asset>
 
     <worldbody>
         <light pos="0 0 3" dir="0 0 -1" directional="true"/>
         <geom name="floor" size="0 0 0.05" type="plane" material="grid" condim="3"/>
 
-        <!-- The Ball -->
-        <body name="ball" pos="2.0 0.0 0.5">
-            <!-- The freejoint name is critical for finding it in C++ -->
-            <freejoint name="ball_joint"/>
-            <geom type="sphere" size="0.04" rgba="1 0 0 1" mass="0.05" friction="1 0.005 0.0001"/>
+        <!-- ========================================== -->
+        <!-- THE TABLE TENNIS ENVIRONMENT               -->
+        <!-- ========================================== -->
+        
+        <!-- Regulation Table: 2.74m long (X), 1.525m wide (Y), 0.76m high (Z) -->
+        <body name="ping_pong_table" pos="0 0 0.74">
+            <!-- Table top -->
+            <geom type="box" size="1.37 0.7625 0.02" material="table_blue" friction="0.1 0.005 0.0001"/>
+            <!-- Table legs -->
+            <geom type="cylinder" size="0.02 0.37" pos="1.2 0.6 -0.37" rgba="0.2 0.2 0.2 1"/>
+            <geom type="cylinder" size="0.02 0.37" pos="1.2 -0.6 -0.37" rgba="0.2 0.2 0.2 1"/>
+            <geom type="cylinder" size="0.02 0.37" pos="-1.2 0.6 -0.37" rgba="0.2 0.2 0.2 1"/>
+            <geom type="cylinder" size="0.02 0.37" pos="-1.2 -0.6 -0.37" rgba="0.2 0.2 0.2 1"/>
         </body>
-    </worldbody>
 
-    <contact>
-        <exclude body1="ball" body2="link0"/>
-    </contact>
+        <!-- The Net -->
+        <body name="net" pos="0 0 0.83625">
+            <geom type="box" size="0.01 0.7625 0.07625" material="net_white"/>
+        </body>
+
+        <!-- ========================================== -->
+        <!-- THE BALL & HUMAN OPPONENT                  -->
+        <!-- ========================================== -->
+
+        <body name="ball" pos="1.0 0.0 1.2">
+            <freejoint name="ball_joint"/>
+            <geom type="sphere" size="0.02" rgba="1 0.5 0 1" mass="0.0027" friction="0.1 0.005 0.0001"/>
+        </body>
+
+        <!-- Human Mocap Paddle (Can be dragged via Python viewer) -->
+        <body name="human_paddle" pos="1.4 0 1.0" mocap="true">
+            <geom type="cylinder" size="0.08" fromto="-0.01 0 0 0.01 0 0" rgba="0.8 0.1 0.1 1"/>
+        </body>
+
+        <!-- ========================================== -->
+        <!-- ROBOT MOUNTS (60/40 Split Setup)           -->
+        <!-- ========================================== -->
+
+        <!-- Left Arm Mount (Covers Left & Center) -->
+        <body name="left_mount" pos="-1.5 0.3 0.76">
+            <!-- Arm A will attach here -->
+        </body>
+
+        <!-- Right Arm Mount (Covers Right Flank) -->
+        <body name="right_mount" pos="-1.5 -0.4 0.76">
+            <!-- Arm B will attach here -->
+        </body>
+
+    </worldbody>
 </mujoco>
