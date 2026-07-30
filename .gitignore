@@ -2,6 +2,7 @@
 mujoco_env/
 mujoco/
 pycache/
+__pycache__/
 .env
 
 # Jupyter
@@ -18,3 +19,4 @@ notes/
 # Data
 landing_results.csv
 *.png
+models/
