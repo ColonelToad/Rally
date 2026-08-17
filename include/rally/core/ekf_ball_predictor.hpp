@@ -14,29 +14,77 @@ class FixedPointScalar {
 public:
     constexpr FixedPointScalar() : raw_(0) {}
     constexpr FixedPointScalar(double val) : raw_(static_cast<int64_t>(val * 4294967296.0)) {} // 32.32 format
-    
+
     double to_double() const { return static_cast<double>(raw_) / 4294967296.0; }
 
     FixedPointScalar operator+(const FixedPointScalar& o) const { FixedPointScalar r; r.raw_ = raw_ + o.raw_; return r; }
     FixedPointScalar operator-(const FixedPointScalar& o) const { FixedPointScalar r; r.raw_ = raw_ - o.raw_; return r; }
-    FixedPointScalar operator*(const FixedPointScalar& o) const { 
-        FixedPointScalar r; 
-        r.raw_ = static_cast<int64_t>((static_cast<__int128>(raw_) * o.raw_) >> 32); 
-        return r; 
+    FixedPointScalar operator-() const { FixedPointScalar r; r.raw_ = -raw_; return r; }
+    FixedPointScalar operator*(const FixedPointScalar& o) const {
+        FixedPointScalar r;
+        r.raw_ = mul64(raw_, o.raw_);
+        return r;
     }
-    FixedPointScalar operator/(const FixedPointScalar& o) const { 
-        FixedPointScalar r; 
-        r.raw_ = static_cast<int64_t>((static_cast<__int128>(raw_) << 32) / o.raw_); 
-        return r; 
+    FixedPointScalar operator/(const FixedPointScalar& o) const {
+        FixedPointScalar r;
+        r.raw_ = div64(raw_, o.raw_);
+        return r;
     }
 
+    FixedPointScalar& operator+=(const FixedPointScalar& o) { raw_ += o.raw_; return *this; }
+    FixedPointScalar& operator-=(const FixedPointScalar& o) { raw_ -= o.raw_; return *this; }
+    FixedPointScalar& operator*=(const FixedPointScalar& o) { raw_ = mul64(raw_, o.raw_); return *this; }
+    FixedPointScalar& operator/=(const FixedPointScalar& o) { raw_ = div64(raw_, o.raw_); return *this; }
+
+    bool operator==(const FixedPointScalar& o) const { return raw_ == o.raw_; }
+    bool operator!=(const FixedPointScalar& o) const { return raw_ != o.raw_; }
     bool operator>(double val) const { return to_double() > val; }
     bool operator<(double val) const { return to_double() < val; }
     bool operator>=(double val) const { return to_double() >= val; }
 
     friend FixedPointScalar sqrt(FixedPointScalar val) { return FixedPointScalar(std::sqrt(val.to_double())); }
+    friend std::ostream& operator<<(std::ostream& os, const FixedPointScalar& v) { return os << v.to_double(); }
 
 private:
+    // 64x64->128-bit widening multiply/divide without __int128 (an ISO
+    // C++ extension that -Wpedantic -Werror rejects). Splits each 64-bit
+    // operand into high/low 32-bit halves and combines via standard
+    // 64-bit arithmetic, which is portable across compilers/targets —
+    // notably including the embedded ARM toolchains this scalar type
+    // exists for in the first place (docs/EMBEDDED_NOTES.md).
+    static int64_t mul64(int64_t a, int64_t b) {
+        bool neg = (a < 0) != (b < 0);
+        uint64_t ua = a < 0 ? static_cast<uint64_t>(-a) : static_cast<uint64_t>(a);
+        uint64_t ub = b < 0 ? static_cast<uint64_t>(-b) : static_cast<uint64_t>(b);
+
+        uint64_t a_hi = ua >> 32, a_lo = ua & 0xFFFFFFFFu;
+        uint64_t b_hi = ub >> 32, b_lo = ub & 0xFFFFFFFFu;
+
+        uint64_t lo_lo = a_lo * b_lo;
+        uint64_t hi_lo = a_hi * b_lo;
+        uint64_t lo_hi = a_lo * b_hi;
+        uint64_t hi_hi = a_hi * b_hi;
+
+        // Full 128-bit product = (hi_hi << 64) + (hi_lo + lo_hi) << 32 + lo_lo.
+        // We only need bits [32, 96) of that product (>>32 of a 128-bit
+        // value, truncated to 64 bits), which is what the >>32 in the
+        // original 32.32 fixed-point multiply extracts.
+        uint64_t mid = hi_lo + lo_hi;
+        uint64_t result = hi_hi * (uint64_t(1) << 32) + mid + (lo_lo >> 32);
+        int64_t signed_result = static_cast<int64_t>(result);
+        return neg ? -signed_result : signed_result;
+    }
+
+    static int64_t div64(int64_t a, int64_t b) {
+        // Q32.32 divide via double-precision intermediate. Loses some
+        // precision relative to a true 128-bit integer divide, but avoids
+        // __int128 entirely; acceptable for this scalar's purpose (an EKF
+        // running comfortably inside double's mantissa range).
+        double da = static_cast<double>(a) / 4294967296.0;
+        double db = static_cast<double>(b) / 4294967296.0;
+        return static_cast<int64_t>((da / db) * 4294967296.0);
+    }
+
     int64_t raw_;
 };
 using RealScalar = FixedPointScalar;
@@ -127,6 +175,22 @@ public:
 
         Eigen::Matrix<RealScalar, 6, 6> I = Eigen::Matrix<RealScalar, 6, 6>::Identity();
         P_ = (I - K * H) * P_ * (I - K * H).transpose() + K * R_ * K.transpose();
+
+        last_innovation_norm_ = std::sqrt(get_double(y(0)) * get_double(y(0)) +
+                                           get_double(y(1)) * get_double(y(1)) +
+                                           get_double(y(2)) * get_double(y(2)));
+    }
+
+    // For observability (PHILOSOPHY.md Principle 6): the measurement
+    // residual magnitude from the most recent update() call.
+    double last_innovation_norm() const { return last_innovation_norm_; }
+
+    // Trace of the state covariance — a scalar proxy for "how confident
+    // is the filter right now," logged alongside innovation.
+    double covariance_trace() const {
+        double trace = 0.0;
+        for (int i = 0; i < 6; ++i) trace += get_double(P_(i, i));
+        return trace;
     }
 
     Eigen::Vector2d predict_landing_point() const {
@@ -151,6 +215,56 @@ public:
         return Eigen::Vector2d(px, py);
     }
 
+    // Forward-simulates the filtered state (same drag-aware integration as
+    // predict_landing_point) until the ball's X position crosses target_x,
+    // returning (y, z, time_to_cross) at that plane — the query an arm
+    // needs for interception, distinct from "where does it land."
+    // valid is false if the ball is moving away from target_x or the plane
+    // is never crossed within a reasonable time horizon.
+    struct PlaneCrossing {
+        double y;
+        double z;
+        double time_to_cross;
+        bool valid;
+    };
+
+    PlaneCrossing predict_plane_crossing(double target_x) const {
+        double px = get_double(x_(0));
+        double py = get_double(x_(1));
+        double pz = get_double(x_(2));
+        double vx = get_double(x_(3));
+        double vy = get_double(x_(4));
+        double vz = get_double(x_(5));
+
+        bool approaching = (target_x > px) ? (vx > 0.0) : (vx < 0.0);
+        if (!approaching) {
+            return {0.0, 0.0, 0.0, false};
+        }
+
+        double sim_dt = 0.002;
+        double elapsed = 0.0;
+        const double kMaxHorizon = 1.5;
+        bool started_below = px < target_x;
+
+        while (elapsed < kMaxHorizon) {
+            double v_norm = std::sqrt(vx * vx + vy * vy + vz * vz);
+            px += vx * sim_dt;
+            py += vy * sim_dt;
+            pz += vz * sim_dt;
+            vx += (-cd_ * v_norm * vx) * sim_dt;
+            vy += (-cd_ * v_norm * vy) * sim_dt;
+            vz += (-9.81 - (cd_ * v_norm * vz)) * sim_dt;
+            elapsed += sim_dt;
+
+            bool now_below = px < target_x;
+            if (now_below != started_below) {
+                return {py, pz, elapsed, true};
+            }
+        }
+
+        return {0.0, 0.0, 0.0, false};
+    }
+
 private:
     double get_double(RealScalar val) const {
 #ifdef FIXED_POINT
@@ -166,6 +280,7 @@ private:
     Eigen::Matrix<RealScalar, 6, 6> P_;
     Eigen::Matrix<RealScalar, 6, 6> Q_;
     Eigen::Matrix<RealScalar, 3, 3> R_;
+    double last_innovation_norm_ = 0.0;
 };
 
 } // namespace core

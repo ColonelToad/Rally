@@ -75,9 +75,10 @@ public:
 private:
     TaskConfig tasks_[MAX_TASKS];
     int task_count_;
+    int log_producer_slot_;
 
     void handle_deadline_miss(const TaskConfig& config, uint64_t actual_runtime_us);
-    void log_jitter(TaskConfig& config, int64_t jitter_us);
+    void log_jitter(TaskConfig& config, int64_t jitter_us, uint64_t runtime_us, bool deadline_missed);
 };
 
 } // namespace core

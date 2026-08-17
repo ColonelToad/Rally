@@ -27,6 +27,15 @@ if(RALLY_SANITIZE)
     add_link_options(-fsanitize=address -fsanitize=undefined)
 endif()
 
+# Fixed-point EKF/planner path for embedded targets without a hardware FPU
+# (docs/EMBEDDED_NOTES.md) — off by default, matching RALLY_ONLINE_FEATURES'
+# "opt-in, defaults off" convention documented in PHILOSOPHY.md Principle 3.
+option(RALLY_FIXED_POINT "Build the EKF/planner using Q32.32 fixed-point instead of double" OFF)
+if(RALLY_FIXED_POINT)
+    message(STATUS "RALLY: Fixed-point math ENABLED (FIXED_POINT)")
+    add_compile_definitions(FIXED_POINT)
+endif()
+
 # ==============================================================================
 # 2. DEPENDENCIES (From PHILOSOPHY.md Principle 2 & 4)
 # ==============================================================================

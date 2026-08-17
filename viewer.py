@@ -119,6 +119,7 @@ def run_viewer(model, data, coach):
                     if len(msg) == msg_size:
                         qpos = np.frombuffer(msg, dtype=np.float64)
                         data.qpos[:] = qpos
+                        mujoco.mj_forward(model, data)
             except zmq.Again:
                 pass
 
@@ -132,8 +133,6 @@ def run_viewer(model, data, coach):
             if human_command["run_stress_test"]:
                 execute_stress_test(coach)
                 human_command["run_stress_test"] = False
-
-            mujoco.mj_forward(model, data)
 
             current_time = time.time()
             if (current_time - last_render_time) >= render_interval:

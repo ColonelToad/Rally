@@ -1,11 +1,13 @@
 #include "rally/core/task_executor.hpp"
 #include "rally/core/clock.hpp" // Fixes 'Clock' and 'ClockMode' errors
+#include "rally/core/logger.hpp"
 #include <sys/mman.h>           // For mlockall
 #include <pthread.h>
 #include <sched.h>
 #include <iostream>
 #include <thread>               // Fixes 'std::this_thread' error
 #include <chrono>               // Fixes 'std::chrono' error
+#include <cstring>
 
 namespace rally {
 namespace core {
@@ -58,6 +60,7 @@ TaskExecutor::TaskExecutor() : task_count_(0) {
     for (int i = 0; i < MAX_TASKS; ++i) {
         tasks_[i] = {nullptr, 0, 0, 0, {}};
     }
+    log_producer_slot_ = Logger::instance().register_producer();
 }
 
 bool TaskExecutor::register_task(ITask* task, uint32_t frequency_hz, uint32_t deadline_us) {
@@ -104,9 +107,10 @@ void TaskExecutor::step() {
             uint64_t actual_runtime = exec_end - exec_start;
             int64_t jitter = static_cast<int64_t>(exec_start) - static_cast<int64_t>(due_time);
 
-            log_jitter(config, jitter);
+            bool deadline_missed = actual_runtime > config.max_runtime_us;
+            log_jitter(config, jitter, actual_runtime, deadline_missed);
 
-            if (actual_runtime > config.max_runtime_us) {
+            if (deadline_missed) {
                 handle_deadline_miss(config, actual_runtime);
             }
 
@@ -135,8 +139,18 @@ void TaskExecutor::handle_deadline_miss(const TaskConfig& config, uint64_t actua
               << "us, Took: " << actual_runtime_us << "us. Skipping remainder and recovering.\n";
 }
 
-void TaskExecutor::log_jitter(TaskConfig& config, int64_t jitter_us) {
+void TaskExecutor::log_jitter(TaskConfig& config, int64_t jitter_us, uint64_t runtime_us, bool deadline_missed) {
     config.stats.record(jitter_us);
+
+    LogRecord record;
+    record.timestamp_us = Clock::now_us();
+    record.type = LogRecordType::TASK_JITTER;
+    std::strncpy(record.task_jitter.task_name, config.task->get_name(), sizeof(record.task_jitter.task_name) - 1);
+    record.task_jitter.task_name[sizeof(record.task_jitter.task_name) - 1] = '\0';
+    record.task_jitter.jitter_us = jitter_us;
+    record.task_jitter.runtime_us = runtime_us;
+    record.task_jitter.deadline_missed = deadline_missed ? 1 : 0;
+    Logger::instance().log(log_producer_slot_, record);
 }
 
 } // namespace core
