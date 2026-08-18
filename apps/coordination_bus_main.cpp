@@ -76,6 +76,8 @@ int main() {
             } else {
                 play_style_right_push.send(params_out, ZMQ_DONTWAIT);
             }
+            std::cout << "[Coordination Bus] RallyOutcome routed to "
+                      << (left_lost ? "LEFT" : "RIGHT") << " arm\n";
         }
 
         // Sleep to enforce 100Hz HLC rate
