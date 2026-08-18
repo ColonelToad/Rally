@@ -109,12 +109,14 @@ target_link_libraries(coordination_bus PRIVATE rally_ipc rally_core)
 enable_testing()
 
 add_executable(test_task_executor tests/unit/test_task_executor.cpp)
-# Ensure it can find catch.hpp in the unit tests folder
 target_include_directories(test_task_executor PRIVATE tests/unit)
 target_link_libraries(test_task_executor PRIVATE rally_core)
-
-# Register the test with CMake
 add_test(NAME TaskExecutorTest COMMAND test_task_executor)
+
+add_executable(test_ekf_ball_predictor tests/unit/test_ekf_ball_predictor.cpp)
+target_include_directories(test_ekf_ball_predictor PRIVATE tests/unit)
+target_link_libraries(test_ekf_ball_predictor PRIVATE rally_core Eigen3::Eigen)
+add_test(NAME EkfBallPredictorTest COMMAND test_ekf_ball_predictor)
 
 add_executable(benchmark_executor apps/benchmark_executor_main.cpp)
 target_link_libraries(benchmark_executor PRIVATE rally_core Eigen3::Eigen)
