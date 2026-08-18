@@ -36,6 +36,17 @@ if(RALLY_FIXED_POINT)
     add_compile_definitions(FIXED_POINT)
 endif()
 
+# Online features: LLM brain.py orchestrator and Streamlit dashboard. Opt-in, defaults off
+# to allow embedded deployment without Python runtime. When off, control loop is fully
+# functional; on, adds vision/coaching agents (docs/PHILOSOPHY.md Principle 1).
+option(RALLY_ONLINE_FEATURES "Build with LLM orchestrator and Streamlit dashboard support" OFF)
+if(RALLY_ONLINE_FEATURES)
+    message(STATUS "RALLY: Online features ENABLED (LLM brain.py + Streamlit)")
+    add_compile_definitions(ONLINE_FEATURES)
+else()
+    message(STATUS "RALLY: Online features DISABLED (embedded mode only)")
+endif()
+
 # ==============================================================================
 # 2. DEPENDENCIES (From PHILOSOPHY.md Principle 2 & 4)
 # ==============================================================================
