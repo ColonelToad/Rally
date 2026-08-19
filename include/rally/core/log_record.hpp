@@ -12,6 +12,7 @@ enum class LogRecordType : uint8_t {
     EKF_FUSION = 1,
     ARBITER_DECISION = 2,
     HAL_ROUNDTRIP = 3,
+    RLS_CONVERGENCE = 4,
 };
 
 struct TaskJitterPayload {
@@ -46,6 +47,15 @@ struct HalRoundtripPayload {
 };
 static_assert(sizeof(HalRoundtripPayload) == 32, "HalRoundtripPayload layout changed");
 
+struct RLSConvergencePayload {
+    uint8_t arm_id;           // 0=left, 1=right
+    uint8_t _padding[7];
+    double target_offset_y;   // theta[0]
+    double aggression_factor; // theta[1]
+    double reaction_margin;   // theta[2]
+};
+static_assert(sizeof(RLSConvergencePayload) == 32, "RLSConvergencePayload layout changed");
+
 // Fixed-size union-like record. Every record is the same width on disk
 // regardless of type, so the replayer can seek/scan without parsing a
 // variable-length format.
@@ -58,6 +68,7 @@ struct LogRecord {
         EkfFusionPayload ekf_fusion;
         ArbiterDecisionPayload arbiter_decision;
         HalRoundtripPayload hal_roundtrip;
+        RLSConvergencePayload rls_convergence;
     };
 
     LogRecord() : timestamp_us(0), type(LogRecordType::TASK_JITTER), _padding{}, task_jitter{} {}

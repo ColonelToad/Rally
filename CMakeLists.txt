@@ -129,6 +129,11 @@ target_include_directories(test_ekf_ball_predictor PRIVATE tests/unit)
 target_link_libraries(test_ekf_ball_predictor PRIVATE rally_core Eigen3::Eigen)
 add_test(NAME EkfBallPredictorTest COMMAND test_ekf_ball_predictor)
 
+add_executable(test_planner_components tests/unit/test_planner_components.cpp)
+target_include_directories(test_planner_components PRIVATE tests/unit)
+target_link_libraries(test_planner_components PRIVATE rally_core Eigen3::Eigen)
+add_test(NAME PlannerComponentsTest COMMAND test_planner_components)
+
 add_executable(benchmark_executor apps/benchmark_executor_main.cpp)
 target_link_libraries(benchmark_executor PRIVATE rally_core Eigen3::Eigen)
 

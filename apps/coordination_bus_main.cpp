@@ -2,12 +2,14 @@
 #include "rally/messages/arm_status.hpp"
 #include "rally/messages/rally_outcome.hpp"
 #include "rally/messages/play_style_params.hpp"
+#include "rally/core/logger.hpp"
 #include "planner/rls_estimator.hpp"
 #include <iostream>
 #include <chrono>
 #include <thread>
 
 using namespace rally::ipc;
+using namespace rally::core;
 
 const std::string ARM_A_STATUS_PULL_URL = "ipc:///tmp/rally/arm_a_status.sock";
 // RallyOutcome arrives from mujoco_bridge over TCP (crosses the physics/HLC
@@ -20,6 +22,9 @@ const double CYCLE_TIME_MS = 1000.0 / LOOP_RATE_HZ;
 
 int main() {
     std::cout << "[Coordination Bus] Starting up..." << std::endl;
+    Logger::instance().start("rally_telemetry_coordination_bus.log");
+    Logger::instance().register_producer();
+
     ZmqContext ctx;
 
     // Bind PULL socket to receive statuses from Arm A
@@ -78,6 +83,19 @@ int main() {
             }
             std::cout << "[Coordination Bus] RallyOutcome routed to "
                       << (left_lost ? "LEFT" : "RIGHT") << " arm\n";
+
+            // Log RLS convergence state after the update
+            LogRecord rec;
+            rec.timestamp_us = incoming_outcome.timestamp_us;
+            rec.type = LogRecordType::RLS_CONVERGENCE;
+            rec.rls_convergence = {
+                params_out.arm_id,
+                {0, 0, 0, 0, 0, 0, 0},
+                params_out.target_offset_y,
+                params_out.aggression_factor,
+                params_out.reaction_margin
+            };
+            Logger::instance().log(0, rec); // slot 0 for coordination_bus
         }
 
         // Sleep to enforce 100Hz HLC rate
