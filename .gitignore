@@ -16,7 +16,10 @@ mujoco_menagerie/
 build/
 notes/
 
-# Data
-landing_results.csv
+# Data & Logs (runtime artifacts)
+data/
+logs/
+landing_results*.csv
+rally_telemetry*.log
 *.png
 models/
